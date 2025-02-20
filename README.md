@@ -1,97 +1,73 @@
-<<<<<<< HEAD
-# AI Marketing Research & Ad Generator
+# AdVocate: AI-Powered Ad Generator
 
-An AI-powered platform that automates market research, marketing strategy development, and advertisement generation through specialized AI agents.
+AdVocate is an AI-powered platform that automates the creation of marketing research and advertisements. It uses specialized AI agents to streamline market analysis, strategy development, and content generation.
+
+## Key Features
+
+-   **Automated Market Research:** Conducts in-depth market research and generates insightful reports.
+-   **AI-Driven Marketing Strategies:** Develops comprehensive marketing strategies tailored to your brand.
+-   **Ad Content Generation:** Automatically creates engaging ad content and image prompts.
 
 ## Core Components
 
-### Research Agent (`src/agents/research/`)
-- Conducts automated market research
-- Generates research questions
-- Analyzes market data
-- Produces structured reports
+-   **Research Agent:** Automates market research, analyzes data, and generates reports.
+-   **Marketing Agent:** Analyzes brand voice, creates audience profiles, and develops marketing strategies.
+-   **Ad Generator:** Creates ad content, generates image prompts, and processes campaigns.
 
-### Marketing Agent (`src/agents/marketing/`)
-- Analyzes brand voice
-- Creates audience profiles
-- Generates campaign ideas
-- Develops marketing strategies
+## Setup Instructions
 
-### Ad Generator (`src/agents/AdGen/`)
-- Creates ad content
-- Generates image prompts
-- Processes campaigns
-- Handles visual assets
+1.  **Clone the repository:**
 
-## Infrastructure
+    ```bash
+    git clone https://github.com/JNK234/AdVocate---AI-Ad-Generator.git
+    cd AdVocate---AI-Ad-Generator
+    ```
 
-### Data Storage (`models/vectorstore/`)
-- ChromaDB integration
-- Two-tier caching system
-- Session-based caching
-- Persistent storage
+2.  **Configure the environment:**
 
-### Core Systems (`src/core/`)
-- LLM integration
-- Tool management
-- Utility functions
+    ```bash
+    cp .env.template .env
+    ```
 
-## Features
+    Edit the `.env` file with your Azure OpenAI API credentials and other necessary configurations.
 
-### Analysis Pipeline
-1. Market Research
-2. Brand Analysis
-3. Strategy Development
-4. Campaign Generation
-5. Content Creation
+3.  **Install dependencies:**
 
-### Campaign Generation
-- Multiple campaign variations
-- Core messaging
-- Visual themes
-- Social media strategy
-- Implementation plans
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-### Web Interface
-- Streamlit-based dashboard
-- Research and Marketing tabs
-- Progress tracking
-- History management
+4.  **Run the application:**
 
-## Setup
-
-1. Configure environment:
-```bash
-cp .env.template .env
-# Edit .env with your credentials
-```
-
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-3. Run application:
-```bash
-streamlit run app.py
-```
+    ```bash
+    streamlit run app.py
+    ```
 
 ## Requirements
-- Python 3.8+
-- Azure OpenAI API access
-- ChromaDB
-- Streamlit
-- LangChain
 
-## Data Flow
-Research → Marketing → Ad Generation
+-   Python 3.8+
+-   Azure OpenAI API access
+-   Streamlit
+-   LangChain
 
-## Documentation
-See individual module directories for detailed documentation:
-- `/src/agents/research/`
-- `/src/agents/marketing/`
-- `/src/agents/AdGen/`
-=======
-# AdVocate---AI-Ad-Generator
-Agentic Advertisement Generator 
->>>>>>> c1fa7c69eacb3ded87745a93bb023611dd7b8458
+## Project Structure
+
+```
+├── ad_generation_app.py     # Main application file
+├── app.py                    # Streamlit web interface
+├── campaign_generator.py     # Campaign generation logic
+├── campaign_results.json     # Stores campaign results
+├── enhanced_app.py           # Enhanced application features
+├── main.py                   # Main execution script
+├── models/                   # AI models and data storage
+│   └── vectorstore/          # Vector storage configurations
+├── notebooks/                # Jupyter notebooks for experimentation
+├── Outputs/                  # Campaign output directory
+├── README.md                 # This file
+├── requirements.txt          # Project dependencies
+├── run_campaign_flow.py      # Campaign execution flow
+└── src/                      # Source code directory
+    ├── agents/               # AI agent implementations
+    ├── config/               # Configuration settings
+    └── core/                 # Core functionalities
+```
