@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # AI Marketing Research & Ad Generator
 
 An AI-powered platform that automates market research, marketing strategy development, and advertisement generation through specialized AI agents.
@@ -90,3 +91,7 @@ See individual module directories for detailed documentation:
 - `/src/agents/research/`
 - `/src/agents/marketing/`
 - `/src/agents/AdGen/`
+=======
+# AdVocate---AI-Ad-Generator
+Agentic Advertisement Generator 
+>>>>>>> c1fa7c69eacb3ded87745a93bb023611dd7b8458
