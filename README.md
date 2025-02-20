@@ -81,8 +81,8 @@ The solution uses a modular architecture with three main agents orchestrated by 
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/JNK234/AdVocate---AI-Ad-Generator.git
-    cd AdVocate---AI-Ad-Generator
+    git clone [https://github.com/JNK234/AdVocate---AI-Ad-Generator.git](https://github.com/JNK234/AdVocate-Agentic-Ad-Generator.git)
+    cd AdVocate-Agentic-Ad-Generator
     ```
 
 2.  **Configure the environment:**
