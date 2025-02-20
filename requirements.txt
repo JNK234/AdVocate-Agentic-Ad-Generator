@@ -1,0 +1,9 @@
+requests
+python-dotenv
+langgraph
+langchain
+langchain_community
+openai
+streamlit
+chromadb
+plotly
