@@ -1,425 +1,547 @@
-import asyncio
 import os
+import sys
+import asyncio
 import streamlit as st
 from datetime import datetime
+import plotly.graph_objects as go
+from pathlib import Path
+import json
+import re
+from dataclasses import dataclass
+from typing import List, Optional
+
+# Add the project root to Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.agents.research.agent import ResearchAgent
-from marketing_strategy_agent import MarketingAgent
+from src.agents.marketing.agent import MarketingAgent, parse_research_results
 from src.agents.AdGen.orchestrator import AdCampaignOrchestrator
 from src.agents.AdGen.ad_content_generator import CreativeAgent
-from src.core.llm import create_llm
+from src.core.claude_llm import create_claude_llm
 from src.config.settings import load_settings
 from src.core.tools import create_tavily_tool
 from langchain.agents import AgentType
-from models.vectorstore import ChromaStore
+from src.agents.AdGen.image_gen import SDXLTurboGenerator
 
-# Initialize ChromaDB
-vectorstore = ChromaStore()
+@dataclass
+class Campaign:
+    # Display fields
+    name: str
+    core_message: str
+    visual_theme: str
+    emotional_appeal: str
+    timeline: str
+    success_metrics: List[str]
+    
+    # Additional fields for asset generation
+    social_media_focus: str = ""
+    photography_style: str = ""
+    color_palette: str = ""
+    key_visual_elements: str = ""
+    mood_atmosphere: str = ""
+    budget_allocation: str = ""
+    engagement_tactics: str = ""
+    hashtag_strategy: str = ""
+    risk_mitigation: str = ""
 
-# LLM and Agent setup
-settings = load_settings()
-llm = create_llm(azure_settings=settings.azure)
+def parse_campaign_details(marketing_results: str) -> List[Campaign]:
+    """Parse campaign details from marketing results string"""
+    campaigns = []
+    
+    print(marketing_results)
+    
+    # Split into individual campaigns
+    campaign_sections = re.split(r'Campaign Idea \d+:', marketing_results)
+    campaign_sections = [s.strip() for s in campaign_sections if s.strip()]
+    
+    for section in campaign_sections:
+        try:
+            # Extract all fields using regex
+            name_match = re.search(r'(?:1\.|Campaign Name:?)\s*["""]?(.*?)["""]?\s*(?=2\.|Core Message|$)', section, re.DOTALL)
+            message_match = re.search(r'(?:2\.|Core Message:?)\s*(.*?)(?=3\.|Visual Theme|$)', section, re.DOTALL)
+            theme_match = re.search(r'(?:3\.|Visual Theme Description:?)\s*(.*?)(?=4\.|Key Emotional Appeal|$)', section, re.DOTALL)
+            appeal_match = re.search(r'(?:4\.|Key Emotional Appeal:?)\s*(.*?)(?=5\.|Social Media Focus|$)', section, re.DOTALL)
+            timeline_match = re.search(r'(?:6\.|Campaign Timeline:?)\s*(.*?)(?=7\.|Success Metrics|$)', section, re.DOTALL)
+            metrics_match = re.search(r'(?:7\.|Success Metrics:?)\s*(.*?)(?=8\.|Budget Allocation|$)', section, re.DOTALL)
+            
+            # Extract detailed visual theme components
+            theme_text = theme_match.group(1) if theme_match else ""
+            color_palette = re.search(r'Color Palette:?\s*(.*?)(?=Photography Style|$)', theme_text, re.DOTALL)
+            photography = re.search(r'Photography Style:?\s*(.*?)(?=Key Visual Elements|$)', theme_text, re.DOTALL)
+            visual_elements = re.search(r'Key Visual Elements:?\s*(.*?)(?=Mood and Atmosphere|$)', theme_text, re.DOTALL)
+            mood = re.search(r'Mood and Atmosphere:?\s*(.*?)(?=$)', theme_text, re.DOTALL)
+            
+            # Extract social media and budget details
+            social_match = re.search(r'Social Media Focus:?\s*(.*?)(?=Campaign Timeline|$)', section, re.DOTALL)
+            budget_match = re.search(r'Budget Allocation:?\s*(.*?)(?=Risk Mitigation|$)', section, re.DOTALL)
+            risk_match = re.search(r'Risk Mitigation:?\s*(.*?)(?=$)', section, re.DOTALL)
+            
+            # Extract engagement and hashtag strategy from social media section
+            social_text = social_match.group(1) if social_match else ""
+            engagement = re.search(r'Engagement Tactics:?\s*(.*?)(?=Hashtag Strategy|$)', social_text, re.DOTALL)
+            hashtags = re.search(r'Hashtag Strategy:?\s*(.*?)(?=$)', social_text, re.DOTALL)
+            
+            # Extract and clean metrics
+            metrics = []
+            if metrics_match:
+                metrics_text = metrics_match.group(1).strip()
+                metrics = [m.strip() for m in metrics_text.split(',')]
+            
+            # Create campaign with all extracted information
+            campaign = Campaign(
+                name=name_match.group(1).strip() if name_match else "Untitled Campaign",
+                core_message=message_match.group(1).strip() if message_match else "",
+                visual_theme=theme_match.group(1).strip() if theme_match else "",
+                emotional_appeal=appeal_match.group(1).strip() if appeal_match else "",
+                timeline=timeline_match.group(1).strip() if timeline_match else "",
+                success_metrics=metrics,
+                social_media_focus=social_match.group(1).strip() if social_match else "",
+                photography_style=photography.group(1).strip() if photography else "",
+                color_palette=color_palette.group(1).strip() if color_palette else "",
+                key_visual_elements=visual_elements.group(1).strip() if visual_elements else "",
+                mood_atmosphere=mood.group(1).strip() if mood else "",
+                budget_allocation=budget_match.group(1).strip() if budget_match else "",
+                engagement_tactics=engagement.group(1).strip() if engagement else "",
+                hashtag_strategy=hashtags.group(1).strip() if hashtags else "",
+                risk_mitigation=risk_match.group(1).strip() if risk_match else ""
+            )
+            campaigns.append(campaign)
+            
+        except Exception as e:
+            print(f"Error parsing campaign section: {str(e)}")
+            continue
+    
+    return campaigns
 
-# Initialize tools
-search_tool = create_tavily_tool(api_key=settings.tavily_api_key)
-tools = [search_tool]
-
-# Initialize creative agent and orchestrator
-creative_agent = CreativeAgent(llm=llm)
-ad_orchestrator = AdCampaignOrchestrator(creative_agent=creative_agent)
-
-# Initialize research agent
-research_agent = ResearchAgent(
-    llm=llm,
-    tools=tools,
-    agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-    verbose=True,
-    vectorstore=vectorstore
+# Page configuration
+st.set_page_config(
+    page_title="AdVocate",
+    page_icon="🎯",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
-research_agent.initialize()
 
-marketing_agent = MarketingAgent(
-    llm=llm,
-    tools=tools,
-    agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-    verbose=True,
-    vectorstore=vectorstore,
-)
-marketing_agent.initialize()
+# Initialize theme in session state
+if 'theme' not in st.session_state:
+    st.session_state.theme = 'light'
+
+# Custom CSS with theme support
+st.markdown(f"""
+    <style>
+    /* Base styles */
+    .main {{ padding: 2rem; }}
+    
+    /* Theme-specific styles */
+    .theme-light {{
+        --bg-color: #ffffff;
+        --text-color: #1E1E1E;
+        --card-bg: #f8f9fa;
+        --card-border: #dee2e6;
+        --primary-color: #FF4B4B;
+    }}
+    
+    .theme-dark {{
+        --bg-color: #1E1E1E;
+        --text-color: #F8F9FA;
+        --card-bg: #2D2D2D;
+        --card-border: #404040;
+        --primary-color: #FF6B6B;
+    }}
+    
+    /* Apply theme */
+    .main {{
+        background-color: var(--bg-color);
+        color: var(--text-color);
+    }}
+    
+    .stButton>button {{
+        width: 100%;
+        border-radius: 20px;
+        height: 3em;
+        background-color: var(--primary-color);
+        color: white;
+        transition: all 0.3s ease;
+    }}
+    
+    .stButton>button:hover {{
+        opacity: 0.9;
+        transform: translateY(-2px);
+    }}
+    
+    .campaign-card {{
+        background-color: var(--card-bg);
+        color: var(--text-color);
+        padding: 1.5rem;
+        border-radius: 10px;
+        margin-bottom: 1rem;
+        border: 1px solid var(--card-border);
+        transition: transform 0.2s ease;
+    }}
+    
+    .campaign-card:hover {{
+        transform: translateY(-2px);
+    }}
+    
+    /* Typography improvements */
+    h1, h2, h3 {{
+        font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+        font-weight: 600;
+        color: var(--text-color);
+    }}
+    
+    p {{
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        line-height: 1.6;
+        color: var(--text-color);
+    }}
+    </style>
+    
+    <script>
+        document.body.classList.add('theme-{st.session_state.theme}');
+    </script>
+""", unsafe_allow_html=True)
+
+# Initialize session state
+if 'initialized' not in st.session_state:
+    st.session_state.initialized = False
+    st.session_state.research_cache = {}
+    st.session_state.marketing_cache = {}
+    st.session_state.research_history = []
+    st.session_state.current_company = ""
+    st.session_state.current_audience = ""
+    st.session_state.ad_assets = {}
+    st.session_state.session_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    st.session_state.progress = 0
+    st.session_state.current_step = "start"
+
+async def initialize_agents():
+    """Initialize all required agents and tools"""
+    if not st.session_state.initialized:
+        with st.spinner("Initializing AI agents..."):
+            settings = load_settings()
+            llm = create_claude_llm(api_key=settings.claude_api_key)
+            search_tool = create_tavily_tool(api_key=settings.tavily_api_key)
+            tools = [search_tool]
+            image_generator = SDXLTurboGenerator()
+            
+            st.session_state.research_agent = ResearchAgent(llm=llm, tools=tools, verbose=True)
+            await st.session_state.research_agent.initialize()
+            
+            st.session_state.marketing_agent = MarketingAgent(llm=llm, tools=tools, verbose=True)
+            await st.session_state.marketing_agent.initialize()
+            
+            st.session_state.creative_agent = CreativeAgent(llm=llm, tools=tools, verbose=True)
+            st.session_state.ad_orchestrator = AdCampaignOrchestrator(
+                creative_agent=st.session_state.creative_agent,
+                image_generator=image_generator,
+                llm=llm
+            )
+            
+            st.session_state.initialized = True
+            print("Agents initialized successfully")
+
+def display_landing():
+    """Display the landing page"""
+    st.title("🎯 AdVocate")
+    st.markdown("""
+    <div style='text-align: center; margin-bottom: 2rem;'>
+        <h3 style='font-style: italic; color: var(--text-color); opacity: 0.9;'>
+            AI-Powered Marketing Campaigns That Speak Your Brand's Truth
+        </h3>
+    </div>
+    <div style='padding: 1.5rem; background-color: var(--card-bg); border-radius: 10px; border: 1px solid var(--card-border);'>
+        <p style='font-size: 1.1em; margin-bottom: 0;'>
+            Transform your marketing vision into compelling campaigns. Enter your company details below to harness the power of AI for your brand.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+def display_progress():
+    """Display progress bar and current step"""
+    steps = {"start": 0, "research": 33, "marketing": 66, "campaign": 100}
+    progress = steps.get(st.session_state.current_step, 0)
+    st.progress(progress/100)
 
 async def get_research_data(company: str, audience: str, force_new: bool = False):
-    """
-    Two-tier cache check:
-    1. Check session cache (for active session)
-    2. Check ChromaDB (for persistent storage)
-    3. Run research agent if needed
-    """
+    """Get research data with caching"""
     cache_key = f"{company}_{audience}"
-    
-    # Check session cache first (fastest)
     if not force_new and cache_key in st.session_state.research_cache:
-        return {
-            "result": st.session_state.research_cache[cache_key]["result"],
-            "source": "session_cache",
-            "timestamp": st.session_state.research_cache[cache_key]["timestamp"]
-        }
+        return st.session_state.research_cache[cache_key]
     
-    # Check ChromaDB if not in session
-    if not force_new:
-        chroma_results = vectorstore.search(
-            query=company,
-            k=1,
-            filter_metadata={
-                "where": {
-                    "$and": [
-                        {"company_name": {"$eq": company}},
-                        {"content_type": {"$eq": "analysis"}}
-                    ]
-                }
-            }
-        )
-        
-        if chroma_results:
-            # Found in ChromaDB, cache in session and return
-            research_data = {
-                "result": chroma_results[0]['document'],
-                "timestamp": chroma_results[0]['metadata']['timestamp'],
-                "source": "chroma_cache"
-            }
-            # Cache in session for future use
-            st.session_state.research_cache[cache_key] = research_data
-            return research_data
+    if not st.session_state.initialized:
+        await initialize_agents()
     
-    # No cache hit, run research agent
-    if force_new:
-        prompt = f"Conduct fresh research for {company} targeting {audience}. Focus on market size, customer needs, and potential strategies."
-    else:
-        prompt = f"Research market opportunities and strategies for {company} targeting {audience}. Focus on market size, customer needs, and potential strategies."
+    research_data = await st.session_state.research_agent.run(
+        company_name=company,
+        target_audience=audience
+    )
     
-    new_research = await research_agent.run(prompt)
-    
-    # Cache the new results in both session and ChromaDB
-    research_data = {
-        "result": new_research,
+    result = {
+        "result": research_data,
         "timestamp": datetime.utcnow().isoformat(),
         "source": "new_research"
     }
     
-    # Update session cache
-    st.session_state.research_cache[cache_key] = research_data
-    
-    return research_data
+    st.session_state.research_cache[cache_key] = result
+    return result
 
-async def get_marketing_data(research_result: str, company: str, force_new: bool = False):
-    """
-    Similar two-tier caching for marketing analysis
-    """
+async def get_marketing_data(research_result: str, company: str, audience: str, force_new: bool = False):
+    """Get marketing analysis with caching"""
     cache_key = f"marketing_{company}"
-    
-    # Check session cache
     if not force_new and cache_key in st.session_state.marketing_cache:
-        return {
-            "result": st.session_state.marketing_cache[cache_key]["result"],
-            "source": "session_cache",
-            "timestamp": st.session_state.marketing_cache[cache_key]["timestamp"]
-        }
+        return st.session_state.marketing_cache[cache_key]
     
-    # Check ChromaDB
-    if not force_new:
-        chroma_results = vectorstore.search(
-            query=company,
-            k=1,
-            filter_metadata={
-                "where": {
-                    "$and": [
-                        {"company_name": {"$eq": company}},
-                        {"content_type": {"$eq": "marketing_analysis"}}
-                    ]
-                }
-            }
-        )
-        
-        if chroma_results:
-            marketing_data = {
-                "result": chroma_results[0]['document'],
-                "timestamp": chroma_results[0]['metadata']['timestamp'],
-                "source": "chroma_cache"
-            }
-            st.session_state.marketing_cache[cache_key] = marketing_data
-            return marketing_data
+    if not st.session_state.initialized:
+        await initialize_agents()
     
-    # Generate new marketing analysis
-    new_marketing = await marketing_agent.run(research_result)
+    parsed_results = parse_research_results(research_result)
+    marketing_data = await st.session_state.marketing_agent.run(
+        company_summary=parsed_results["company_summary"],
+        target_audience=audience,
+        brand_values=parsed_results["analysis"]
+    )
     
-    marketing_data = {
-        "result": new_marketing,
+    result = {
+        "result": marketing_data,
         "timestamp": datetime.utcnow().isoformat(),
         "source": "new_analysis"
     }
     
-    # Update session cache
-    st.session_state.marketing_cache[cache_key] = marketing_data
+    st.session_state.marketing_cache[cache_key] = result
+    return result
+
+async def display_research_phase():
+    """Display the research phase interface"""
+    st.subheader("🔍 Research Phase")
     
-    return marketing_data
-
-def run_analysis(company, audience, force_new=False):
-    """Synchronous wrapper for the async analysis functions"""
-    return asyncio.run(get_research_data(company, audience, force_new))
-
-def run_marketing(research_result, company, force_new=False):
-    """Synchronous wrapper for the async marketing function"""
-    return asyncio.run(get_marketing_data(research_result, company, force_new))
-
-# Set page config
-st.set_page_config(page_title="AI Marketing Research & Ad Generator", layout="wide")
-
-# Title
-st.title("AI Marketing Research & Ad Generator")
-
-# Initialize session state
-if 'research_cache' not in st.session_state:
-    st.session_state.research_cache = {}
-if 'marketing_cache' not in st.session_state:
-    st.session_state.marketing_cache = {}
-if 'research_history' not in st.session_state:
-    st.session_state.research_history = []
-if 'current_company' not in st.session_state:
-    st.session_state.current_company = ""
-if 'current_audience' not in st.session_state:
-    st.session_state.current_audience = ""
-if 'ad_assets' not in st.session_state:
-    st.session_state.ad_assets = {}
-if 'session_id' not in st.session_state:
-    st.session_state.session_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-
-# Create tabs
-research_tab, marketing_tab = st.tabs(["Research", "Marketing & Ads"])
-
-with research_tab:
-    # Input fields
     col1, col2 = st.columns(2)
     with col1:
-        company = st.text_input("Target Company", key="company")
+        company = st.text_input("Company Name")
     with col2:
-        audience = st.text_input("Target Audience", key="audience")
-
-    # Go ahead button
-    if st.button("Go Ahead"):
+        audience = st.text_input("Target Audience")
+    
+    if st.button("Start Research", key="research_button"):
         if company and audience:
             st.session_state.current_company = company
             st.session_state.current_audience = audience
+            st.session_state.current_step = "research"
             
-            with st.spinner("Retrieving/Generating Research..."):
-                research_data = run_analysis(company, audience)
-                
-                # Show source of data
-                if research_data["source"] == "session_cache":
-                    st.success("Retrieved from current session!")
-                elif research_data["source"] == "chroma_cache":
-                    st.info(f"Retrieved from previous analysis ({research_data['timestamp']})")
-                elif research_data["source"] == "new_research":
-                    st.info("Generated new research!")
-                else:
-                    st.error(research_data["result"])
-                    st.stop()
-                
-                # Option to force new research
-                if research_data["source"] != "new_research":
-                    if st.button("Generate Fresh Research"):
-                        with st.spinner("Generating fresh research..."):
-                            research_data = run_analysis(company, audience, force_new=True)
-                
-                # Store in history
+            with st.spinner("Conducting market research..."):
+                research_data = await get_research_data(company, audience)
                 st.session_state.research_history.append({
                     "type": "research",
                     "company": company,
                     "audience": audience,
                     "result": research_data["result"],
-                    "source": research_data["source"],
                     "timestamp": research_data["timestamp"]
                 })
+                st.session_state.current_step = "marketing"
+                st.rerun()
         else:
-            st.error("Please enter both company and audience")
+            st.error("Please enter both company name and target audience")
 
-    # Follow-up research section
+async def display_marketing_phase():
+    """Display the marketing analysis phase"""
     if st.session_state.research_history:
-        st.subheader("Follow-up Research")
-        follow_up = st.text_area("Enter additional research questions or aspects to explore")
-        
-        if st.button("Do More Research"):
-            if follow_up:
-                prompt = f"Given the target company {company} and target audience {audience}, {follow_up}"
-                with st.spinner("Conducting follow-up research..."):
-                    result = asyncio.run(research_agent.run(prompt))
-                    st.session_state.research_history.append({
-                        "type": "follow_up",
-                        "company": company,
-                        "audience": audience,
-                        "query": follow_up,
-                        "result": result,
-                        "timestamp": datetime.utcnow().isoformat()
-                    })
-            else:
-                st.error("Please enter a follow-up question")
-
-with marketing_tab:
-    if st.session_state.research_history:
-        st.subheader("Marketing Analysis & Ad Generation")
-        
-        # Get latest research
         latest_research = st.session_state.research_history[-1]
-        company = latest_research["company"]
-        
-        if st.button("Generate Marketing Content"):
-            with st.spinner("Analyzing and generating marketing content..."):
-                marketing_data = run_marketing(
-                    latest_research["result"],
-                    company
-                )
-                
-                # Show source of data
-                if marketing_data["source"] == "session_cache":
-                    st.success("Retrieved marketing analysis from current session!")
-                elif marketing_data["source"] == "chroma_cache":
-                    st.info(f"Retrieved marketing analysis from cache ({marketing_data['timestamp']})")
-                else:
-                    st.success("Generated new marketing analysis!")
-                
-                marketing_result = marketing_data["result"]
-                    
-                # Option to force new analysis
-                if marketing_data["source"] != "new_analysis":
-                    if st.button("Generate Fresh Marketing Analysis"):
-                        with st.spinner("Generating fresh marketing analysis..."):
-                            marketing_data = run_marketing(
-                                latest_research["result"],
-                                company,
-                                force_new=True
-                            )
-                
-                # Display marketing results
-                marketing_result = marketing_data["result"]
-                
-                # Display campaigns and generate ads
-                if isinstance(marketing_result, list):
-                    for i, campaign in enumerate(marketing_result):
-                            with st.expander(f"Campaign {i+1}: {campaign.get('campaign_name', 'Untitled')}", expanded=i==0):
-                                col1, col2 = st.columns(2)
-                                
-                                with col1:
-                                    st.subheader("Campaign Overview")
-                                    st.write(f"**Core Message:** {campaign.get('core_message', 'N/A')}")
+        with st.spinner("Generating marketing analysis..."):
+            marketing_data = await get_marketing_data(
+                latest_research["result"],
+                latest_research["company"],
+                st.session_state.current_audience
+            )
+            st.session_state.current_step = "campaign"
+            st.rerun()
+    else:
+        st.info("Please complete the research phase first")
+
+async def display_campaign_generation():
+    """Display campaign generation interface with simplified UI"""
+    st.subheader("💡 Generated Campaigns")
+    
+    if st.session_state.current_step == "campaign":
+        try:
+            marketing_data = st.session_state.marketing_cache.get(
+                f"marketing_{st.session_state.current_company}", {}
+            ).get("result", "")
+            
+            campaigns = parse_campaign_details(marketing_data)
+            
+            if campaigns:
+                for i, campaign in enumerate(campaigns):
+                    with st.container():
+                        st.markdown(f"""
+                        <div class="campaign-card">
+                            <h3 style="font-size: 1.8em; margin-bottom: 1rem;">{campaign.name}</h3>
+                            <div style="display: grid; gap: 1rem;">
+                                <div style="background: rgba(255, 75, 75, 0.1); padding: 1rem; border-radius: 8px;">
+                                    <h4 style="margin: 0; color: var(--primary-color);">Core Message</h4>
+                                    <p style="margin: 0.5rem 0 0 0;">{campaign.core_message}</p>
+                                </div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                                    <div>
+                                        <h4 style="color: var(--text-color);">Visual Theme</h4>
+                                        <p>{campaign.visual_theme}</p>
+                                    </div>
+                                    <div>
+                                        <h4 style="color: var(--text-color);">Emotional Appeal</h4>
+                                        <p>{campaign.emotional_appeal}</p>
+                                    </div>
+                                </div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                                    <div>
+                                        <h4 style="color: var(--text-color);">Timeline</h4>
+                                        <p>{campaign.timeline}</p>
+                                    </div>
+                                    <div>
+                                        <h4 style="color: var(--text-color);">Success Metrics</h4>
+                                        <ul style="margin: 0.5rem 0 0 1.2rem; padding: 0;">
+                            {' '.join([f'<li>{metric}</li>' for metric in campaign.success_metrics])}
+                                        </ul>
+                                    </div>
+                                </div>
+                                <p style="color: var(--text-color); opacity: 0.8; font-size: 0.9em; margin-top: 0.5rem; text-align: center;">
+                                    <i>✨ Additional details available for asset generation including color palette, photography style, and social media strategy.</i>
+                                </p>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        if st.button(f"Generate Assets for Campaign {i+1}", key=f"gen_assets_{i}"):
+                            with st.spinner("Generating campaign assets..."):
+                                try:
+                                    # Pass complete campaign information to asset generation
+                                    campaign_dict = {
+                                        "campaign_name": campaign.name,
+                                        "core_message": campaign.core_message,
+                                        "visual_theme_description": campaign.visual_theme,
+                                        "key_emotional_appeal": campaign.emotional_appeal,
+                                        "success_metrics": campaign.success_metrics,
+                                        "prompt_suggestions": {
+                                            "brand_focused": campaign.core_message,
+                                            "visual_focused": f"Color Palette: {campaign.color_palette}\nPhotography Style: {campaign.photography_style}\nKey Elements: {campaign.key_visual_elements}\nMood: {campaign.mood_atmosphere}",
+                                            "social_media": f"Focus: {campaign.social_media_focus}\nTactics: {campaign.engagement_tactics}\nHashtags: {campaign.hashtag_strategy}"
+                                        }
+                                    }
                                     
-                                    st.subheader("Visual Theme")
-                                    visual_theme = campaign.get('visual_theme_description', {})
-                                    if isinstance(visual_theme, dict):
-                                        st.write(f"- Color Palette: {visual_theme.get('color_palette', 'N/A')}")
-                                        st.write(f"- Style: {visual_theme.get('photography_illustration_style', 'N/A')}")
-                                        st.write(f"- Key Elements: {visual_theme.get('key_visual_elements', 'N/A')}")
-                                        st.write(f"- Mood: {visual_theme.get('mood_and_atmosphere', 'N/A')}")
-                                    else:
-                                        st.write(visual_theme)
+                                    assets = await st.session_state.ad_orchestrator.generate_single_campaign(campaign_dict)
+                                    st.session_state.ad_assets[f"campaign_{i}"] = assets
                                     
-                                    st.subheader("Emotional Appeal")
-                                    emotional_appeal = campaign.get('key_emotional_appeal', {})
-                                    if isinstance(emotional_appeal, dict):
-                                        st.write(f"- Primary Emotion: {emotional_appeal.get('primary_emotion', 'N/A')}")
-                                        st.write(f"- Psychological Triggers: {emotional_appeal.get('supporting_psychological_triggers', 'N/A')}")
-                                        st.write(f"- Desired Reaction: {emotional_appeal.get('desired_audience_reaction', 'N/A')}")
-                                    else:
-                                        st.write(emotional_appeal)
-                                
-                                with col2:
-                                    st.subheader("Social Media Strategy")
-                                    social_focus = campaign.get('social_media_focus', {})
-                                    if isinstance(social_focus, dict):
-                                        st.write(f"- Primary Platforms: {social_focus.get('primary_platforms', 'N/A')}")
-                                        st.write(f"- Content Format: {social_focus.get('content_format_recommendations', 'N/A')}")
-                                        st.write(f"- Engagement Tactics: {social_focus.get('engagement_tactics', 'N/A')}")
-                                        st.write(f"- Hashtag Strategy: {social_focus.get('hashtag_strategy', 'N/A')}")
-                                    else:
-                                        st.write(social_focus)
+                                    st.markdown("""
+                                    <div style='background-color: #ffffff; padding: 1.5rem; border-radius: 10px; border: 1px solid #e0e0e0; margin-top: 1rem;'>
+                                        <h4>Generated Campaign Assets</h4>
+                                    </div>
+                                    """, unsafe_allow_html=True)
                                     
-                                    st.subheader("Implementation Details")
-                                    st.write(f"**Campaign Timeline:** {campaign.get('campaign_timeline', 'N/A')}")
-                                    st.write(f"**Success Metrics:** {campaign.get('success_metrics', 'N/A')}")
-                                    st.write(f"**Budget Allocation:** {campaign.get('budget_allocation', 'N/A')}")
-                                    st.write(f"**Risk Mitigation:** {campaign.get('risk_mitigation', 'N/A')}")
-                                
-                                # Display prompt suggestions
-                                st.subheader("AI Image Generation Prompts")
-                                prompt_suggestions = campaign.get('prompt_suggestions', {})
-                                if prompt_suggestions:
-                                    tabs = st.tabs(["Product Focus", "Brand Focus", "Social Media"])
+                                    col1, col2 = st.columns(2)
                                     
-                                    with tabs[0]:
-                                        st.text_area("Product-Focused Prompt", 
-                                                    prompt_suggestions.get('product_focused', ''),
-                                                    height=100,
-                                                    key=f"product_prompt_{i}")
+                                    with col1:
+                                        if os.path.exists(assets['assets']['image']):
+                                            st.image(assets['assets']['image'], caption="Campaign Visual", use_container_width=True)
+                                        else:
+                                            st.warning("Campaign image could not be generated")
                                     
-                                    with tabs[1]:
-                                        st.text_area("Brand-Focused Prompt",
-                                                    prompt_suggestions.get('brand_focused', ''),
-                                                    height=100,
-                                                    key=f"brand_prompt_{i}")
-                                    
-                                    with tabs[2]:
-                                        st.text_area("Social Media Prompt",
-                                                    prompt_suggestions.get('social_media', ''),
-                                                    height=100,
-                                                    key=f"social_prompt_{i}")
-                                
-                                # Ad Generation Section
-                                st.subheader("Ad Generation")
-                                if st.button(f"Generate Ad Assets for Campaign {i+1}", key=f"gen_ad_{i}"):
-                                    with st.spinner("Generating ad assets..."):
-                                        # Generate assets for this campaign
-                                        assets = asyncio.run(ad_orchestrator.generate_single_campaign(campaign))
-                                        st.session_state.ad_assets[f"campaign_{i}"] = assets
-                                        
-                                        # Display generated assets
-                                        st.success("Ad assets generated successfully!")
+                                    with col2:
+                                        try:
+                                            with open(assets['assets']['tagline'], 'r') as f:
+                                                tagline = f.read().strip()
+                                                st.markdown("#### Campaign Tagline")
+                                                st.markdown(f"*{tagline}*")
+                                        except Exception as e:
+                                            st.error("Could not load campaign tagline")
                                         
                                         try:
-                                            # Display image if available
-                                            if os.path.exists(assets['assets']['image']):
-                                                st.image(assets['assets']['image'], caption="Generated Campaign Image")
-                                            
-                                            # Display tagline
-                                            with open(assets['assets']['tagline'], 'r') as f:
-                                                st.subheader("Campaign Tagline")
-                                                st.write(f.read())
-                                            
-                                            # Display story
                                             with open(assets['assets']['story'], 'r') as f:
-                                                st.subheader("Campaign Story")
-                                                st.write(f.read())
+                                                story = f.read().strip()
+                                                st.markdown("#### Campaign Story")
+                                                st.markdown(story)
+                                        except Exception as e:
+                                            st.error("Could not load campaign story")
+                                    
+                                    # Create zip file with assets
+                                    st.markdown("---")
+                                    try:
+                                        import zipfile
+                                        import io
+                                        import shutil
+                                        
+                                        # Create a BytesIO object to store the zip file
+                                        zip_buffer = io.BytesIO()
+                                        
+                                        # Create the zip file
+                                        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                                            # Add image
+                                            if os.path.exists(assets['assets']['image']):
+                                                image_ext = os.path.splitext(assets['assets']['image'])[1]
+                                                zip_file.write(
+                                                    assets['assets']['image'], 
+                                                    f'campaign_{i+1}_image{image_ext}'
+                                                )
                                             
-                                            # Add download buttons
+                                            # Add tagline
+                                            with open(assets['assets']['tagline'], 'r') as f:
+                                                zip_file.writestr(f'campaign_{i+1}_tagline.txt', f.read())
+                                            
+                                            # Add story
+                                            with open(assets['assets']['story'], 'r') as f:
+                                                zip_file.writestr(f'campaign_{i+1}_story.txt', f.read())
+                                        
+                                        # Reset buffer position
+                                        zip_buffer.seek(0)
+                                        
+                                        # Create download button
+                                        col1, col2, col3 = st.columns([1,2,1])
+                                        with col2:
                                             st.download_button(
-                                                label="Download Campaign Details",
-                                                data=open(assets['assets']['details'], 'r').read(),
-                                                file_name=f"campaign_{i+1}_details.json",
-                                                mime="application/json"
+                                                "📥 Download Campaign Assets",
+                                                data=zip_buffer,
+                                                file_name=f"campaign_{i+1}_assets.zip",
+                                                mime="application/zip",
+                                                help="Download all campaign assets (image, tagline, and story)"
                                             )
-                                        except (FileNotFoundError, IOError) as e:
-                                            st.error(f"Error accessing generated files: {str(e)}")
-    else:
-        st.info("Please conduct research first in the Research tab!")
+                                            
+                                    except Exception as e:
+                                        st.error(f"Could not prepare assets for download: {str(e)}")
+                                        
+                                except Exception as e:
+                                    st.error(f"Error generating campaign assets: {str(e)}")
+            else:
+                st.warning("No valid campaigns were generated. Please try again.")
+                
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
 
-# Display research history
-if st.session_state.research_history:
-    st.sidebar.title("Research History")
+async def main():
+    """Main application flow"""
+    await initialize_agents()
     
-    for i, item in enumerate(st.session_state.research_history):
-        with st.sidebar.expander(
-            f"{item['type'].title()} - {item['company']}",
-            expanded=(i == len(st.session_state.research_history) - 1)
-        ):
-            st.write(f"**Timestamp:** {item['timestamp']}")
-            st.write(f"**Target Audience:** {item.get('audience', 'N/A')}")
-            if item['type'] == 'follow_up':
-                st.write(f"**Question:** {item['query']}")
-            st.write("**Results:**")
-            st.write(item['result'])
+    # Sidebar
+    with st.sidebar:
+        st.markdown("### Settings")
+        theme = st.selectbox(
+            "Theme",
+            options=['light', 'dark'],
+            index=0 if st.session_state.theme == 'light' else 1,
+            key='theme_selector'
+        )
+        if theme != st.session_state.theme:
+            st.session_state.theme = theme
+            st.rerun()
+            
+        st.markdown("---")
+        st.markdown("### Progress")
+        display_progress()
+    
+    # Main content
+    if st.session_state.current_step == "start":
+        display_landing()
+        await display_research_phase()
+    elif st.session_state.current_step == "research":
+        await display_research_phase()
+    elif st.session_state.current_step == "marketing":
+        await display_marketing_phase()
+    elif st.session_state.current_step in ["campaign", "assets"]:
+        await display_campaign_generation()
+
+if __name__ == "__main__":
+    asyncio.run(main())
