@@ -1,7 +1,13 @@
 from langchain.prompts.chat import ChatPromptTemplate
 
 CAMPAIGN_GENERATION_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", """You are a creative marketing director tasked with generating innovative advertising campaign ideas. 
+    ("system", """You are a creative marketing director tasked with generating innovative advertising campaign ideas.
+You must structure your responses in the following format:
+
+Thought: [your analysis and reasoning about the task]
+Action: generate_campaigns
+Action Input: [your campaign ideas formatted as specified below]
+
 You will be provided with company information, the target audience, and brand values. Use this information to generate 5 distinct campaign ideas.
 
 Company Information:

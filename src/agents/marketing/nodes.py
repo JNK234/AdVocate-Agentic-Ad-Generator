@@ -39,4 +39,16 @@ class MarketingNodes:
             )
         )
         
-        return {"campaign_ideas": response.content}
+        # Parse the response to extract the campaign ideas from the Action Input
+        content = response.content
+        try:
+            # Split by sections
+            sections = content.split("Action Input:")
+            if len(sections) < 2:
+                raise ValueError("Response missing Action Input section")
+            
+            campaign_ideas = sections[1].strip()
+            return {"campaign_ideas": campaign_ideas}
+        except Exception as e:
+            print(f"Error parsing LLM response: {str(e)}")
+            return {"campaign_ideas": content}  # Fallback to full content if parsing fails
