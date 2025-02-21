@@ -7,3 +7,5 @@ openai
 streamlit
 chromadb
 plotly
+langchain_anthropic
+langchain_openai

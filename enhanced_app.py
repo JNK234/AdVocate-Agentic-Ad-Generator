@@ -51,10 +51,10 @@ def parse_campaign_details(marketing_results: str) -> List[Campaign]:
     print(marketing_results)
     
     # Split into individual campaigns
-    campaign_sections = re.split(r'Campaign \d+:', marketing_results)
+    campaign_sections = re.split(r'Campaign Idea \d+:', marketing_results)
     campaign_sections = [s.strip() for s in campaign_sections if s.strip()]
     
-    for section in campaign_sections[1:]:
+    for section in campaign_sections:
         try:
             # Extract all fields using regex
             name_match = re.search(r'(?:1\.|Campaign Name:?)\s*["""]?(.*?)["""]?\s*(?=2\.|Core Message|$)', section, re.DOTALL)
@@ -437,7 +437,7 @@ async def display_campaign_generation():
                                     
                                     with col1:
                                         if os.path.exists(assets['assets']['image']):
-                                            st.image(assets['assets']['image'], caption="Campaign Visual", use_column_width=True)
+                                            st.image(assets['assets']['image'], caption="Campaign Visual", use_container_width=True)
                                         else:
                                             st.warning("Campaign image could not be generated")
                                     
