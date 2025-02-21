@@ -39,14 +39,16 @@ STORY_GENERATION_PROMPT = ChatPromptTemplate.from_messages([
 ])
 
 IMAGE_PROMPT_GENERATION = ChatPromptTemplate.from_messages([
-    ("system", """You are an art director specializing in visual advertising concepts."""),
-    ("human", """Create an image generation prompt based on:
-    Campaign Name: {campaign_name}
-    Product Focus: {product_prompt}
-    Brand Elements: {brand_prompt}
-    Social Media Context: {social_prompt}
+    ("system", """You are an art director specializing in visual advertising concepts. Create concise, impactful image prompts that capture the essence of advertising campaigns while staying under 2000 characters. Focus on key visual elements and keep descriptions clear and specific."""),
+    ("human", """Generate a focused image prompt based on:
+    Core Message: {summary_prompt}
     
-    Generate a detailed prompt that will create visually compelling advertising imagery."""),
+    Additional Context:
+    - Product Details: {product_prompt}
+    - Brand Elements: {brand_prompt}
+    - Social Context: {social_prompt}
+    
+    Create a concise prompt (under 2000 characters) that emphasizes the core message while incorporating key visual elements. Focus on the most impactful aspects that will create compelling advertising imagery."""),
 ])
 
 QUALITY_CHECK_PROMPT = ChatPromptTemplate.from_messages([

@@ -79,13 +79,36 @@ class GraphNodes:
                 )
             )
 
-            # Generate image prompt
+            # Truncate prompt components
+            def truncate_text(text: str, max_length: int = 500) -> str:
+                """Truncate text to specified length while keeping complete sentences."""
+                if not text or len(text) <= max_length:
+                    return text
+                
+                # Find the last complete sentence within the limit
+                truncated = text[:max_length]
+                last_period = truncated.rfind('.')
+                if last_period > 0:
+                    return text[:last_period + 1]
+                return truncated
+            
+            # Generate image prompt with truncated components
+            campaign_name = truncate_text(idea["campaign_name"], 100)
+            product_prompt = truncate_text(idea["prompt_suggestions"].get("product_focused", ""), 400)
+            brand_prompt = truncate_text(idea["prompt_suggestions"].get("brand_focused", ""), 400)
+            social_prompt = truncate_text(idea["prompt_suggestions"].get("social_media", ""), 400)
+            
+            # Create a concise summary prompt
+            summary_prompt = f"{campaign_name}: {idea['core_message']}"
+            summary_prompt = truncate_text(summary_prompt, 200)
+            
             image_prompt_response = await self.llm.apredict_messages(
                 IMAGE_PROMPT_GENERATION.format_messages(
-                    campaign_name=idea["campaign_name"],
-                    product_prompt=idea["prompt_suggestions"].get("product_focused", ""),
-                    brand_prompt=idea["prompt_suggestions"].get("brand_focused", ""),
-                    social_prompt=idea["prompt_suggestions"].get("social_media", "")
+                    campaign_name=campaign_name,
+                    product_prompt=product_prompt,
+                    brand_prompt=brand_prompt,
+                    social_prompt=social_prompt,
+                    summary_prompt=summary_prompt
                 )
             )
 

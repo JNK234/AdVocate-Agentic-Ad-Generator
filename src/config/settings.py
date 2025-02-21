@@ -19,6 +19,7 @@ class Settings:
     azure: AzureSettings
     tavily_api_key: str
     claude_api_key: str
+    openai_api_key: str
 
 def load_settings() -> Settings:
     """
@@ -39,7 +40,8 @@ def load_settings() -> Settings:
         "AZURE_OPENAI_API_VERSION",
         "AZURE_OPENAI_DEPLOYMENT_NAME",
         "TAVILY_API_KEY",
-        "CLAUDE_API_KEY"
+        "CLAUDE_API_KEY",
+        "OPENAAI_API_KEY"
     ]
     
     # Check for missing environment variables
@@ -59,7 +61,8 @@ def load_settings() -> Settings:
     settings = Settings(
         azure=azure_settings,
         tavily_api_key=os.getenv("TAVILY_API_KEY"),
-        claude_api_key=os.getenv("CLAUDE_API_KEY")
+        claude_api_key=os.getenv("CLAUDE_API_KEY"),
+        openai_api_key=os.getenv("OPENAAI_API_KEY")
     )
     
     return settings
